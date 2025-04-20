@@ -43,6 +43,22 @@ export class RoomDO extends DurableObject<CloudflareBindings> {
 
       this.state.acceptWebSocket(server);
 
+      // Send latest 100 messages to the client after connection
+      const chatKey = `messages:${id}`;
+      let messages = (await this.state.storage.get<Message[]>(chatKey)) || [];
+      // Only send the latest 100 messages
+      const latestMessages = messages.slice(-100).reverse();
+      // Send as a single JSON array
+      queueMicrotask(() => {
+        try {
+          server.send(
+            JSON.stringify({ type: "history", messages: latestMessages })
+          );
+        } catch (e) {
+          // Ignore send errors
+        }
+      });
+
       return new Response(null, {
         status: 101,
         webSocket: client,

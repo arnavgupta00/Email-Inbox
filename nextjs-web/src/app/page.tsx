@@ -1,10 +1,35 @@
+"use client";
 import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Navbar } from "@/components/navbar";
 import BackgroundFigure from "@/components/BackgroundFigure";
 
-export default async function Home() {
+export default function Home() {
+  const [alias, setAlias] = useState("");
+  const [error, setError] = useState("");
+  const router = useRouter();
+
+  const handleGenerate = () => {
+    setError("");
+    const trimmed = alias.trim();
+    if (!trimmed) {
+      setError("Please enter an alias or email.");
+      return;
+    }
+    if (trimmed.includes("@")) {
+      if (trimmed.endsWith("@dejavu.social")) {
+        router.push(`/${trimmed}`);
+      } else {
+        setError("Only @dejavu.social emails are allowed.");
+      }
+    } else {
+      router.push(`/${trimmed}@dejavu.social`);
+    }
+  };
+
   return (
     <main
       /* 135 deg = top‑left → bottom‑right  */
@@ -43,18 +68,26 @@ export default async function Home() {
                   type="text"
                   placeholder="alias"
                   className="bg-background border-purple-700/50 focus:border-purple-500"
+                  value={alias}
+                  onChange={(e) => setAlias(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleGenerate();
+                  }}
                 />
                 <span className="flex items-center text-muted-foreground">
                   @dejavu.social
                 </span>
               </div>
+              {error && (
+                <div className="text-xs text-red-400 pt-1">{error}</div>
+              )}
             </div>
 
             <Button
               className="w-full bg-purple-700 hover:bg-purple-600 text-white"
-              asChild
+              onClick={handleGenerate}
             >
-              <Link href="/inbox">Generate &amp; View Inbox</Link>
+              Generate &amp; View Inbox
             </Button>
           </div>
         </div>

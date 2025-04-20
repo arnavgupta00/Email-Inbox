@@ -36,6 +36,7 @@ export default {
 					text: email.text,
 					html: email.html,
 					attachments: email.attachments,
+					timestamp: email.date,
 				}),
 			};
 			console.log('requestOptions', requestOptions);

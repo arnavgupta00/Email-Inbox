@@ -16,13 +16,7 @@ export function Navbar() {
             href="/"
             className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
-            Generate
-          </Link>
-          <Link
-            href="/inbox"
-            className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Inbox
+            Made By Arnav Gupta
           </Link>
         </nav>
       </div>
