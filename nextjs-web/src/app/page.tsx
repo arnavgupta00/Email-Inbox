@@ -2,16 +2,19 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Navbar } from "@/components/navbar";
+import BackgroundFigure from "@/components/BackgroundFigure";
 
 export default async function Home() {
   return (
     <main
       /* 135 deg = top‑left → bottom‑right  */
       className="
-        min-h-screen flex flex-col
-        bg-[linear-gradient(135deg,#05090d_0%,#05090d_25%,#0f0b1a_60%,#332137_100%)]
-      "
+      relative           /* anchor for the absolute Image */
+      min-h-screen flex flex-col
+      bg-[linear-gradient(135deg,#05090d_0%,#05090d_25%,#0f0b1a_60%,#332137_100%)]
+    "
     >
+      <BackgroundFigure />
       <Navbar />
 
       <div className="flex-1 flex flex-col items-center justify-center p-6">
