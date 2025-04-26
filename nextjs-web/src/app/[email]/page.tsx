@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDistanceToNow } from "date-fns";
 import sanitizeHtml from "sanitize-html";
 import React, { useRef } from "react";
+import { Dialog } from "@headlessui/react"; // Add this import
 
 /*****************************************************************************************
  * InboxPage — colour‑reversal edition                                                    *
@@ -34,8 +35,8 @@ interface EmailAddress {
 
 interface IncomingEmail {
   subject: string;
-  from: EmailAddress;
-  to: EmailAddress[];
+  from: EmailAddress | any;
+  to: EmailAddress[] | any;
   text: string;
   html: string;
   timestamp?: string | number;
@@ -184,6 +185,8 @@ export default function InboxPage({
             const mapped = [toEmail(data as IncomingEmail)];
             setEmails((prev) => [...mapped, ...prev]);
             setSelectedEmail((sel) => sel ?? mapped[0]);
+
+            console.log("New email:", mapped);
           }
         } catch (err) {
           console.error("❌ Failed to parse incoming WS message", err);
@@ -201,6 +204,79 @@ export default function InboxPage({
       if (ws && ws.readyState === ws.OPEN) ws.close();
     };
   }, [decodedEmail]);
+
+  // Compose dialog state
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeData, setComposeData] = useState<{
+    to: string;
+    subject: string;
+    text: string;
+    html: string;
+    attachments: File[];
+  }>({
+    to: "",
+    subject: "",
+    text: "",
+    html: "",
+    attachments: [],
+  });
+  async function storeEmail(email: any) {
+    const requestOptions = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        subject: email.subject,
+        from: email.from.address,
+        to: email.to[0].address,
+        text: email.text,
+        html: email.html,
+        attachments: email.attachments,
+        timestamp: email.timestamp,
+        // You can add a flag or extra field if needed to distinguish storage
+        storage: true,
+      }),
+    };
+    await fetch(
+      `https://durable-object-pubsub.adv-dep-test.workers.dev/webhook/room/${email.from.address}`,
+      requestOptions
+    )
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((result) => console.log("Stored email:", result))
+      .catch((error) => console.error("Storage error:", error));
+  }
+
+  // Store composed emails (for demo, just log or push to a local array)
+  const handleComposeSend = async () => {
+    const composed = {
+      subject: composeData.subject,
+      from: { address: decodedEmail, name: "" },
+      to: [{ address: composeData.to, name: "" }],
+      text: composeData.text,
+      html: composeData.html,
+      attachments: composeData.attachments,
+      timestamp: new Date(),
+    };
+    // For demo: log or push to a local array
+    console.log("Composed email:", composed);
+    // Optionally: setEmails(prev => [toEmail(composed), ...prev]);
+    await storeEmail(composed);
+
+    setComposeOpen(false);
+    setComposeData({
+      to: "",
+      subject: "",
+      text: "",
+      html: "",
+      attachments: [],
+    });
+  };
 
   return (
     <main className="h-screen overflow-hidden flex flex-col bg-background">
@@ -252,7 +328,25 @@ export default function InboxPage({
                   >
                     <div className="flex justify-between items-start mb-1">
                       <div className="font-medium">
-                        {email.from.name || email.from.address}
+                        {email.from.name || email.from.address || (
+                          <span className="inline-flex items-center gap-1">
+                            <svg
+                              width="16"
+                              height="16"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              className="text-muted-foreground"
+                              style={{
+                                display: "inline",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              <path d="M2 8h12M10 5l4 3-4 3" />
+                            </svg>
+                            {email.to}
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-muted-foreground whitespace-nowrap">
                         {formatDistanceToNow(email.timestamp, {
@@ -308,6 +402,7 @@ export default function InboxPage({
                     <AvatarImage src={`/placeholder.svg?height=40&width=40`} />
                     <AvatarFallback>
                       {(selectedEmail.from.name ||
+                        selectedEmail.from ||
                         selectedEmail.from.address)[0]?.toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
@@ -405,6 +500,126 @@ export default function InboxPage({
           )}
         </div>
       </div>
+      {/* Compose Button */}
+      <button
+        className="fixed bottom-8 right-8 z-50 bg-primary text-primary-foreground rounded-full shadow-lg p-4 hover:bg-primary/90 transition-all flex items-center gap-2"
+        onClick={() => setComposeOpen(true)}
+        aria-label="Compose"
+        style={{ boxShadow: "0 4px 24px #0002" }}
+      >
+        <svg
+          width="24"
+          height="24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+        </svg>
+        <span className="hidden sm:inline"></span>
+      </button>
+      {/* Compose Dialog */}
+      <Dialog
+        open={composeOpen}
+        onClose={() => setComposeOpen(false)}
+        className="fixed z-50 inset-0 flex items-center justify-center"
+      >
+        <div className="fixed inset-0 bg-black/40" aria-hidden="true" />
+        <div className="relative bg-card rounded-xl shadow-xl w-full max-w-lg mx-auto p-6">
+          <Dialog.Title className="text-lg font-semibold mb-4">
+            Compose Mail
+          </Dialog.Title>
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleComposeSend();
+            }}
+          >
+            <div>
+              <label className="block text-sm font-medium mb-1">To</label>
+              <input
+                type="email"
+                required
+                className="w-full px-3 py-2 rounded-md border bg-background text-foreground"
+                value={composeData.to}
+                onChange={(e) =>
+                  setComposeData((d) => ({ ...d, to: e.target.value }))
+                }
+                placeholder="recipient@example.com"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Subject</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 rounded-md border bg-background text-foreground"
+                value={composeData.subject}
+                onChange={(e) =>
+                  setComposeData((d) => ({ ...d, subject: e.target.value }))
+                }
+                placeholder="Subject"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Message</label>
+              <textarea
+                className="w-full px-3 py-2 rounded-md border bg-background text-foreground min-h-[100px]"
+                value={composeData.text}
+                onChange={(e) =>
+                  setComposeData((d) => ({ ...d, text: e.target.value }))
+                }
+                placeholder="Write your message..."
+              />
+            </div>
+            {/* Optionally: HTML input and attachments */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                HTML (optional)
+              </label>
+              <textarea
+                className="w-full px-3 py-2 rounded-md border bg-background text-foreground min-h-[60px]"
+                value={composeData.html}
+                onChange={(e) =>
+                  setComposeData((d) => ({ ...d, html: e.target.value }))
+                }
+                placeholder="<b>HTML content</b>"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Attachments
+              </label>
+              <input
+                type="file"
+                multiple
+                onChange={(e) =>
+                  setComposeData((d) => ({
+                    ...d,
+                    attachments: Array.from(e.target.files || []),
+                  }))
+                }
+              />
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                className="px-4 py-2 rounded-md bg-secondary text-foreground border border-border"
+                onClick={() => setComposeOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-md bg-primary text-primary-foreground"
+              >
+                Send
+              </button>
+            </div>
+          </form>
+        </div>
+      </Dialog>
     </main>
   );
 }

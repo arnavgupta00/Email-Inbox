@@ -1,7 +1,21 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 export { RoomDO } from "./durable-object";
 
 const app = new Hono<{ Bindings: CloudflareBindings }>();
+app.use(
+  "*",
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "https://disposable.dejavu.social",
+      "http://localhost:8787",
+    ],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
 
 app.get("/room/:id", async (c) => {
   console.log("asf");
