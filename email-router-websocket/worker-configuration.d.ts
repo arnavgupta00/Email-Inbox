@@ -5,6 +5,7 @@ declare namespace Cloudflare {
 	interface Env {
 		ROOM: DurableObjectNamespace<import("./src/index").RoomDO>;
 		ASSETS: Fetcher;
+		MASTER_KEY: string;
 	}
 }
 interface CloudflareBindings extends Cloudflare.Env {}

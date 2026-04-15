@@ -6,8 +6,8 @@ import { ThemeProvider } from "@/components/theme-provider";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
-  title: "Disposable Email",
-  description: "Generate disposable email addresses",
+  title: "Aliasr — Disposable Email",
+  description: "Generate temporary disposable email addresses at @aliasr.xyz",
 };
 
 export default function RootLayout({

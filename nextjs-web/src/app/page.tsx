@@ -20,13 +20,13 @@ export default function Home() {
       return;
     }
     if (trimmed.includes("@")) {
-      if (trimmed.endsWith("@dejavu.social")) {
+      if (trimmed.endsWith("@aliasr.xyz")) {
         router.push(`/${trimmed}`);
       } else {
-        setError("Only @dejavu.social emails are allowed.");
+        setError("Only @aliasr.xyz emails are allowed.");
       }
     } else {
-      router.push(`/${trimmed}@dejavu.social`);
+      router.push(`/${trimmed}@aliasr.xyz`);
     }
   };
 
@@ -51,7 +51,7 @@ export default function Home() {
                 bg-clip-text text-transparent
               "
             >
-              DISPOSABLE
+              ALIASR
             </h1>
             <p className="text-sm text-purple-300 uppercase tracking-widest">
               Generate temporary email addresses
@@ -75,7 +75,7 @@ export default function Home() {
                   }}
                 />
                 <span className="flex items-center text-muted-foreground">
-                  @dejavu.social
+                  @aliasr.xyz
                 </span>
               </div>
               {error && (

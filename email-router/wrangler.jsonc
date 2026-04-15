@@ -4,11 +4,14 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "email-router",
+	"name": "aliasr-email-router",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-04-19",
 	"observability": {
 		"enabled": true
+	},
+	"vars": {
+		"WS_BASE_URL": "https://aliasr-ws.aliasr.xyz"
 	}
 	/**
 	 * Smart Placement

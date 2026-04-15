@@ -1,6 +1,7 @@
 export interface CloudflareBindings {
-  WORKERTEST: DurableObjectNamespace;
-  // Add any other bindings you need here
+  ROOM: DurableObjectNamespace;
+  ASSETS: Fetcher;
+  MASTER_KEY: string;
 }
 
 export interface Message {

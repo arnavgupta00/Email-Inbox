@@ -1,9 +1,33 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 
-// Allow any JSON object for messages
 type Message = Record<string, any>;
 type WebhookPayload = Record<string, any>;
+
+// Simple token generation using crypto
+function generateToken(): string {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Hash password using SHA-256 (works in CF Workers without bcryptjs)
+async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hashBuffer), (b) =>
+    b.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+async function verifyPassword(
+  password: string,
+  hash: string
+): Promise<boolean> {
+  const inputHash = await hashPassword(password);
+  return inputHash === hash;
+}
 
 export class RoomDO extends DurableObject<CloudflareBindings> {
   state: DurableObjectState;
@@ -19,36 +43,196 @@ export class RoomDO extends DurableObject<CloudflareBindings> {
     this.sessions = [];
     this.roomId = null;
 
-    // Create a Hono app for handling requests within the DO
     this.app = new Hono();
 
-    // Route for handling WebSocket connections
+    // Check protection status
+    this.app.get("/room/:id/status", async (c) => {
+      const id = c.req.param("id");
+      const passwordData = await this.state.storage.get<{
+        hash: string;
+        isProtected: boolean;
+      }>(`password:${id}`);
+
+      return new Response(
+        JSON.stringify({
+          isProtected: !!passwordData?.isProtected,
+          hasPassword: !!passwordData?.hash,
+        }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    // Set password
+    this.app.post("/room/:id/password", async (c) => {
+      const id = c.req.param("id");
+      const { password } = await c.req.json<{ password: string }>();
+
+      if (!password || password.length < 1) {
+        return new Response(
+          JSON.stringify({ error: "Password is required" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const existing = await this.state.storage.get<{
+        hash: string;
+        isProtected: boolean;
+      }>(`password:${id}`);
+
+      if (existing?.hash) {
+        return new Response(
+          JSON.stringify({ error: "Password already set. Use verify first." }),
+          { status: 409, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const hash = await hashPassword(password);
+      await this.state.storage.put(`password:${id}`, {
+        hash,
+        isProtected: true,
+      });
+
+      // Generate a session token
+      const token = generateToken();
+      const tokenExpiry = Date.now() + 3600000; // 1 hour
+      let tokens =
+        (await this.state.storage.get<Record<string, number>>(
+          `tokens:${id}`
+        )) || {};
+      tokens[token] = tokenExpiry;
+      await this.state.storage.put(`tokens:${id}`, tokens);
+
+      return new Response(JSON.stringify({ success: true, token }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    // Verify password
+    this.app.post("/room/:id/verify", async (c) => {
+      const id = c.req.param("id");
+      const { password, _masterKey } = await c.req.json<{
+        password: string;
+        _masterKey?: string;
+      }>();
+
+      const passwordData = await this.state.storage.get<{
+        hash: string;
+        isProtected: boolean;
+      }>(`password:${id}`);
+
+      if (!passwordData?.isProtected) {
+        // Not protected, grant access
+        const token = generateToken();
+        const tokenExpiry = Date.now() + 3600000;
+        let tokens =
+          (await this.state.storage.get<Record<string, number>>(
+            `tokens:${id}`
+          )) || {};
+        tokens[token] = tokenExpiry;
+        await this.state.storage.put(`tokens:${id}`, tokens);
+        return new Response(JSON.stringify({ valid: true, token }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Check master key (injected server-side, never from frontend)
+      const masterKey = _masterKey || "";
+      const envMasterKey = this.env.MASTER_KEY || "";
+      if (masterKey && envMasterKey && masterKey === envMasterKey) {
+        const token = generateToken();
+        const tokenExpiry = Date.now() + 3600000;
+        let tokens =
+          (await this.state.storage.get<Record<string, number>>(
+            `tokens:${id}`
+          )) || {};
+        tokens[token] = tokenExpiry;
+        await this.state.storage.put(`tokens:${id}`, tokens);
+        return new Response(JSON.stringify({ valid: true, token }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Check regular password
+      if (!password) {
+        return new Response(
+          JSON.stringify({ valid: false, error: "Password required" }),
+          { status: 401, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const isValid = await verifyPassword(password, passwordData.hash);
+      if (!isValid) {
+        return new Response(
+          JSON.stringify({ valid: false, error: "Invalid password" }),
+          { status: 401, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      const token = generateToken();
+      const tokenExpiry = Date.now() + 3600000;
+      let tokens =
+        (await this.state.storage.get<Record<string, number>>(
+          `tokens:${id}`
+        )) || {};
+      tokens[token] = tokenExpiry;
+      await this.state.storage.put(`tokens:${id}`, tokens);
+
+      return new Response(JSON.stringify({ valid: true, token }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    // WebSocket connection with optional token auth
     this.app.get("/room/:id/connect", async (c) => {
       const id = c.req.param("id");
       this.roomId = id;
 
-      console.log("Hey ----");
-      // Check if the request is a WebSocket upgrade
       const upgradeHeader = c.req.header("Upgrade");
       if (!upgradeHeader || upgradeHeader !== "websocket") {
         return new Response("Expected WebSocket", { status: 400 });
       }
 
-      // Create WebSocket pair
+      // Check if room is protected
+      const passwordData = await this.state.storage.get<{
+        hash: string;
+        isProtected: boolean;
+      }>(`password:${id}`);
+
+      if (passwordData?.isProtected) {
+        const url = new URL(c.req.url);
+        const token = url.searchParams.get("token");
+
+        if (!token) {
+          return new Response(
+            JSON.stringify({ error: "Token required for protected inbox" }),
+            { status: 401, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        // Validate token
+        const tokens =
+          (await this.state.storage.get<Record<string, number>>(
+            `tokens:${id}`
+          )) || {};
+        const expiry = tokens[token];
+        if (!expiry || expiry < Date.now()) {
+          return new Response(
+            JSON.stringify({ error: "Invalid or expired token" }),
+            { status: 401, headers: { "Content-Type": "application/json" } }
+          );
+        }
+      }
+
       const webSocketPair = new WebSocketPair();
       const [client, server] = Object.values(webSocketPair);
 
-      // Add the WebSocket to our sessions list
       this.sessions.push(server);
-
       this.state.acceptWebSocket(server);
 
-      // Send latest 100 messages to the client after connection
+      // Send latest 100 messages
       const chatKey = `messages:${id}`;
       let messages = (await this.state.storage.get<Message[]>(chatKey)) || [];
-      // Only send the latest 100 messages
       const latestMessages = messages.slice(-100).reverse();
-      // Send as a single JSON array
       queueMicrotask(() => {
         try {
           server.send(
@@ -69,15 +253,10 @@ export class RoomDO extends DurableObject<CloudflareBindings> {
     this.app.post("/webhook/room/:id", async (c) => {
       const id = c.req.param("id");
       this.roomId = id;
-      console.log("Hey ---- 2");
 
       try {
         const payload = await c.req.json<WebhookPayload>();
-
-        // Store the payload as-is as the message
         const message: Message = payload;
-
-        // Broadcast the message to all connected clients
         await this.broadcast(message);
 
         return new Response(JSON.stringify({ success: true }), {
@@ -93,42 +272,33 @@ export class RoomDO extends DurableObject<CloudflareBindings> {
     });
   }
 
-  // Helper method to broadcast messages to all connected clients
   async broadcast(message: Message) {
-    // Store the message in durable storage (optional)
     if (this.roomId) {
       const chatKey = `messages:${this.roomId}`;
       let messages = (await this.state.storage.get<Message[]>(chatKey)) || [];
       messages.push(message);
-      // Limit to the most recent 100 messages
       if (messages.length > 10000) {
         messages = messages.slice(-100);
       }
       await this.state.storage.put(chatKey, messages);
     }
 
-    // Broadcast to all connected clients
     const messageText = JSON.stringify(message);
-    const deadSessions: WebSocket[] = [];
-
     this.sessions = this.state.getWebSockets().filter((session) => {
       try {
         session.send(messageText);
         return true;
       } catch (err) {
-        deadSessions.push(session);
         return false;
       }
     });
   }
 
-  // Method to handle incoming fetch events
   async fetch(request: Request) {
     return this.app.fetch(request);
   }
 
-  // Keep the existing method
   async sayHello() {
-    return new Response("Hello world");
+    return new Response("Hello from Aliasr");
   }
 }
