@@ -46,18 +46,7 @@ app.post("/room/:id/verify", async (c) => {
   const id = c.req.param("id");
   const doId = c.env.ROOM.idFromName(id);
   const stub = c.env.ROOM.get(doId);
-
-  // Inject the master key into the request for server-side validation
-  const body = await c.req.json();
-  const newRequest = new Request(c.req.raw.url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...body,
-      _masterKey: c.env.MASTER_KEY || "",
-    }),
-  });
-  return stub.fetch(newRequest);
+  return stub.fetch(c.req.raw);
 });
 
 // WebSocket connection endpoint

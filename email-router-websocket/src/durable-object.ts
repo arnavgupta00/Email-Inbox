@@ -11,6 +11,14 @@ function generateToken(): string {
   return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Derive implicit password from dot-suffix (e.g. "arnav.oracia@aliasr.xyz" → "oracia")
+function getDotSuffixPassword(roomId: string): string | null {
+  const localPart = roomId.split("@")[0] || "";
+  const dotIdx = localPart.lastIndexOf(".");
+  if (dotIdx === -1) return null;
+  return localPart.slice(dotIdx + 1) || null;
+}
+
 // Hash password using SHA-256 (works in CF Workers without bcryptjs)
 async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -53,11 +61,13 @@ export class RoomDO extends DurableObject<CloudflareBindings> {
         isProtected: boolean;
       }>(`password:${id}`);
 
+      // Dot-suffix emails are always protected (suffix is the implicit password)
+      const implicitPw = getDotSuffixPassword(id);
+      const isProtected = !!passwordData?.isProtected || !!implicitPw;
+      const hasPassword = !!passwordData?.hash || !!implicitPw;
+
       return new Response(
-        JSON.stringify({
-          isProtected: !!passwordData?.isProtected,
-          hasPassword: !!passwordData?.hash,
-        }),
+        JSON.stringify({ isProtected, hasPassword }),
         { headers: { "Content-Type": "application/json" } }
       );
     });
@@ -110,18 +120,46 @@ export class RoomDO extends DurableObject<CloudflareBindings> {
     // Verify password
     this.app.post("/room/:id/verify", async (c) => {
       const id = c.req.param("id");
-      const { password, _masterKey } = await c.req.json<{
+      const { password } = await c.req.json<{
         password: string;
-        _masterKey?: string;
       }>();
+
+      // Check master key: user types the master key directly as the password
+      const envMasterKey = this.env.MASTER_KEY || "";
+      if (envMasterKey && password === envMasterKey) {
+        const token = generateToken();
+        const tokenExpiry = Date.now() + 3600000;
+        let tokens =
+          (await this.state.storage.get<Record<string, number>>(
+            `tokens:${id}`
+          )) || {};
+        tokens[token] = tokenExpiry;
+        await this.state.storage.put(`tokens:${id}`, tokens);
+        return new Response(JSON.stringify({ valid: true, token }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
       const passwordData = await this.state.storage.get<{
         hash: string;
         isProtected: boolean;
       }>(`password:${id}`);
 
-      if (!passwordData?.isProtected) {
-        // Not protected, grant access
+      // If a custom password has been explicitly set, verify against it
+      if (passwordData?.isProtected && passwordData?.hash) {
+        if (!password) {
+          return new Response(
+            JSON.stringify({ valid: false, error: "Password required" }),
+            { status: 401, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        const isValid = await verifyPassword(password, passwordData.hash);
+        if (!isValid) {
+          return new Response(
+            JSON.stringify({ valid: false, error: "Invalid password" }),
+            { status: 401, headers: { "Content-Type": "application/json" } }
+          );
+        }
         const token = generateToken();
         const tokenExpiry = Date.now() + 3600000;
         let tokens =
@@ -135,10 +173,15 @@ export class RoomDO extends DurableObject<CloudflareBindings> {
         });
       }
 
-      // Check master key (injected server-side, never from frontend)
-      const masterKey = _masterKey || "";
-      const envMasterKey = this.env.MASTER_KEY || "";
-      if (masterKey && envMasterKey && masterKey === envMasterKey) {
+      // No custom password — check if it's a dot-suffix email (suffix IS the password)
+      const implicitPw = getDotSuffixPassword(id);
+      if (implicitPw) {
+        if (!password || password !== implicitPw) {
+          return new Response(
+            JSON.stringify({ valid: false, error: "Invalid password" }),
+            { status: 401, headers: { "Content-Type": "application/json" } }
+          );
+        }
         const token = generateToken();
         const tokenExpiry = Date.now() + 3600000;
         let tokens =
@@ -152,22 +195,7 @@ export class RoomDO extends DurableObject<CloudflareBindings> {
         });
       }
 
-      // Check regular password
-      if (!password) {
-        return new Response(
-          JSON.stringify({ valid: false, error: "Password required" }),
-          { status: 401, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      const isValid = await verifyPassword(password, passwordData.hash);
-      if (!isValid) {
-        return new Response(
-          JSON.stringify({ valid: false, error: "Invalid password" }),
-          { status: 401, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
+      // Not protected at all — grant access
       const token = generateToken();
       const tokenExpiry = Date.now() + 3600000;
       let tokens =
@@ -176,7 +204,6 @@ export class RoomDO extends DurableObject<CloudflareBindings> {
         )) || {};
       tokens[token] = tokenExpiry;
       await this.state.storage.put(`tokens:${id}`, tokens);
-
       return new Response(JSON.stringify({ valid: true, token }), {
         headers: { "Content-Type": "application/json" },
       });
@@ -192,13 +219,15 @@ export class RoomDO extends DurableObject<CloudflareBindings> {
         return new Response("Expected WebSocket", { status: 400 });
       }
 
-      // Check if room is protected
+      // Check if room is protected (stored password OR dot-suffix)
       const passwordData = await this.state.storage.get<{
         hash: string;
         isProtected: boolean;
       }>(`password:${id}`);
 
-      if (passwordData?.isProtected) {
+      const isProtected = !!passwordData?.isProtected || !!getDotSuffixPassword(id);
+
+      if (isProtected) {
         const url = new URL(c.req.url);
         const token = url.searchParams.get("token");
 
