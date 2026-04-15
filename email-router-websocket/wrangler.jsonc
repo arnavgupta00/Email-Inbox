@@ -5,8 +5,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "aliasr-ws",
+  "account_id": "604aa516310f147817bea0cf2c82336b",
   "main": "src/index.ts",
   "compatibility_date": "2025-03-27",
+  "workers_dev": true,
   "assets": {
     "binding": "ASSETS",
     "directory": "./public"

@@ -5,6 +5,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "aliasr-email-router",
+	"account_id": "604aa516310f147817bea0cf2c82336b",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-04-19",
 	"observability": {
