@@ -8,6 +8,9 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata = {
   title: "Aliasr — Disposable Email",
   description: "Generate temporary disposable email addresses at @aliasr.xyz",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({

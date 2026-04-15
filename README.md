@@ -20,7 +20,7 @@ Disposable email service at **@aliasr.xyz** with password-protected inboxes.
 ### email-router-websocket
 | Variable | Description | Default |
 |---|---|---|
-| `MASTER_KEY` | Master key that can access any protected inbox (set via `wrangler secret`) | `papasmurfy3035` |
+| `MASTER_KEY` | Master key that can access any protected inbox (set via `wrangler secret`) |
 
 ### nextjs-web
 | Variable | Description | Default |
